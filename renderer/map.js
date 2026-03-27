@@ -20,11 +20,7 @@ function initMap() {
   olMap = new ol.Map({
     target: 'map-container',
     layers: [
-      new ol.layer.Tile({
-        source: new ol.source.XYZ({
-          url: 'https://{a-c}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-        }),
-      }),
+      // 오프라인 환경 — 단색 배경 (OSM 타일 없음)
       vectorLayer,
     ],
     view: new ol.View({
@@ -419,11 +415,11 @@ function updatePtTableLabel() {
 }
 
 async function extractPoints() {
-  const div      = document.getElementById('pt-div').value;
-  const facility = document.getElementById('pt-facility').value;
-  const sido     = document.getElementById('pt-sido').value;
+  const div        = document.getElementById('pt-div').value;
+  const facility   = document.getElementById('pt-facility').value;
+  const sido       = document.getElementById('pt-sido').value;
   const sigunguRaw = document.getElementById('pt-sigungu').value.trim();
-  const sigungu  = sigunguRaw
+  const sigungu    = sigunguRaw
     ? (sigunguRaw.endsWith('%') ? sigunguRaw : sigunguRaw + '%')
     : '';
 
@@ -434,47 +430,67 @@ async function extractPoints() {
 
   const btn = document.getElementById('pt-extract-btn');
   btn.disabled = true;
-  btn.innerHTML = '<div class="spinner"></div>';
+  btn.innerHTML = '<div class="spinner"></div> 추출 중';
+
+  // 로그 탭으로 이동해서 진행상황 표시
+  const logNav = document.querySelector('.nav-item[onclick*="log"]');
+  addLog('info', `포인트 추출 시작: ${div}_${facility}_${sido}000`);
 
   try {
-    const res  = await fetch(`${window.flaskUrl}/api/map/geojson`, {
+    const res = await fetch(`${window.flaskUrl}/api/map/extract-points`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ div, facility, sido, sigungu }),
     });
-    const data = await res.json();
 
-    if (!res.ok) {
-      showToast(`추출 실패: ${data.error}`, 'err');
-      addLog('err', `포인트 추출 실패: ${data.error}`);
-      return;
+    const reader  = res.body.getReader();
+    const decoder = new TextDecoder();
+    let   buffer  = '';
+    let   done_data = null;
+
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+
+      buffer += decoder.decode(value, { stream: true });
+      const lines = buffer.split('\n\n');
+
+      buffer = lines.pop(); // 마지막 불완전한 청크 보관
+
+      for (const line of lines) {
+        if (!line.startsWith('data: ')) continue;
+        try {
+          const parsed = JSON.parse(line.slice(6));
+          const type   = parsed.type;
+          const msg    = parsed.msg;
+
+          if (type === 'done') {
+            done_data = JSON.parse(msg);
+          } else if (type === 'error') {
+            addLog('err', msg);
+          } else if (type === 'warn') {
+            addLog('warn', msg);
+          } else {
+            addLog('info', msg);
+          }
+        } catch(e) {}
+      }
     }
 
-    const table = `${div}_${facility}_${sido}000`;
-    addLog('ok', `포인트 추출: ${table}${sigungu ? ' WHERE hjd_cde LIKE \'' + sigungu + '\'' : ''} → ${data.count}건`);
-    showToast(`◎ 추출 완료: ${data.count}건`, 'ok');
-
-    // 지도에도 표시 (맵 레이어에 추가)
-    if (!olMap) initMap();
-    if (vectorSource) {
-      const format    = new ol.format.GeoJSON();
-      const features  = format.readFeatures(data, { featureProjection: 'EPSG:3857' });
-      const layerKey  = `${div}_${facility}`;
-      features.forEach(f => f.set('_layer_key', layerKey));
-      vectorSource.addFeatures(features);
-      mapFitExtent();
-      document.getElementById('map-count-label').textContent =
-        `${vectorSource.getFeatures().length}건`;
+    if (done_data) {
+      showToast(`◎ 추출 완료: ${done_data.count}건 → ${done_data.shp_name}`, 'ok');
+      addLog('ok', `저장 완료: ${done_data.path} (${done_data.count}건)`);
     }
 
   } catch(e) {
     showToast('추출 오류: ' + e.message, 'err');
-    addLog('err', '포인트 추출 오류: ' + e.message);
+    addLog('err', '추출 오류: ' + e.message);
   } finally {
     btn.disabled = false;
     btn.innerHTML = '◎ 추출';
   }
 }
+
 
 // ── 페이지 전환 시 ───────────────────────────────────────
 function onMapPageShow() {

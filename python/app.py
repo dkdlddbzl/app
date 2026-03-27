@@ -15,7 +15,7 @@ CORS(app)
 
 FLASK_PORT = 5000
 
-d
+
 # ─── DB 연결 ──────────────────────────────────────────────
 def get_connection():
     conn = psycopg2.connect(

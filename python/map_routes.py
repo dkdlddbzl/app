@@ -1,4 +1,4 @@
-from flask import Blueprint, jsonify, request
+from flask import Blueprint, jsonify, request, Response, stream_with_context
 from sqlalchemy import text
 import json as _json
 import traceback
@@ -260,3 +260,170 @@ def _load_index_map():
 def _save_index_map(data):
     with open(INDEX_MAP_FILE, 'w', encoding='utf-8') as f:
         _json.dump(data, f, ensure_ascii=False, indent=2)
+
+
+# ─── 포인트 추출 (3D 관로 → 꼭짓점 + Z값 + DEM값) ────────
+# ─── 포인트 추출 (SSE 스트리밍) ──────────────────────────
+@map_bp.route('/api/map/extract-points', methods=['POST'])
+def extract_points():
+    data     = request.get_json()
+    div      = (data.get('div')      or '').strip()
+    facility = (data.get('facility') or '').strip()
+    sido     = (data.get('sido')     or '').strip()
+    sigungu  = (data.get('sigungu')  or '').strip()
+
+    if not all([div, facility, sido]):
+        return jsonify({'error': '구분, 시설물, 시도를 선택해주세요.'}), 400
+
+    table = f"{div}_{facility}_{sido}000"
+    if not _is_valid(table):
+        return jsonify({'error': '유효하지 않은 테이블명입니다.'}), 400
+
+    where = f"WHERE hjd_cde LIKE '{sigungu}'" if sigungu else ''
+
+    def generate():
+        import geopandas as gpd
+        import pandas as pd
+        from shapely.geometry import Point
+        from shapely import wkt as _wkt
+        import rasterio
+        from sqlalchemy import text as _text
+        import json as _j
+
+        def sse(msg, t='log'):
+            return f"data: {_j.dumps({'type': t, 'msg': msg})}\n\n"
+
+        try:
+            yield sse(f'[1/4] DB 조회 시작: {table}')
+            engine = _get_engine()
+            sql = _text(
+                f"SELECT *, ST_AsText(ST_Force3D(geom)) AS geom_wkt_3d "
+                f"FROM {table} {where}"
+            )
+            with engine.connect() as con:
+                df = pd.read_sql(sql, con)
+
+            if df.empty:
+                yield sse('데이터가 없습니다.', 'error')
+                return
+
+            yield sse(f'[1/4] DB 조회 완료: {len(df)}개 라인')
+            yield sse(f'[2/4] 꼭짓점 추출 중...')
+
+            records   = []
+            prop_cols = [c for c in df.columns if c not in ('geom', 'geom_wkt_3d')]
+            total     = len(df)
+
+            for idx, (_, row) in enumerate(df.iterrows()):
+                wkt_str = row.get('geom_wkt_3d')
+                if not wkt_str:
+                    continue
+                try:
+                    geom = _wkt.loads(wkt_str)
+                except Exception:
+                    continue
+
+                coords = []
+                if hasattr(geom, 'geoms'):
+                    for part in geom.geoms:
+                        if hasattr(part, 'coords'):
+                            coords.extend(list(part.coords))
+                elif hasattr(geom, 'coords'):
+                    coords = list(geom.coords)
+
+                for coord in coords:
+                    x, y = coord[0], coord[1]
+                    z    = coord[2] if len(coord) > 2 else None
+                    rec  = {c: row.get(c) for c in prop_cols}
+                    rec['z']        = round(z, 4) if z is not None else None
+                    rec['dem']      = None
+                    rec['geometry'] = Point(x, y)
+                    records.append(rec)
+
+                if (idx + 1) % 1000 == 0:
+                    yield sse(f'[2/4] {idx+1}/{total} 라인 → {len(records)}개 포인트')
+
+            if not records:
+                yield sse('꼭짓점 없음', 'error')
+                return
+
+            yield sse(f'[2/4] 꼭짓점 추출 완료: {len(records)}개')
+            gdf = gpd.GeoDataFrame(records, geometry='geometry', crs='EPSG:5186')
+
+            sigungu_code = sigungu.rstrip('%') if sigungu else sido + '000'
+            dem_path     = f"E:/g/{sido}000/{sigungu_code}.tif"
+            dem_error    = None
+            yield sse(f'[3/4] DEM: {dem_path}')
+
+            if os.path.exists(dem_path):
+                try:
+                    with rasterio.open(dem_path) as dem:
+                        gdf_dem    = gdf.to_crs(dem.crs)
+                        all_coords = [(g.x, g.y) for g in gdf_dem.geometry]
+                        chunk      = 10000
+                        for ci in range(0, len(all_coords), chunk):
+                            sampled = list(dem.sample(all_coords[ci:ci+chunk]))
+                            nodata  = dem.nodata
+                            for j, val in enumerate(sampled):
+                                v = float(val[0])
+                                gdf.at[ci+j, 'dem'] = None if (nodata and abs(v-nodata)<1e-6) else round(v, 4)
+                            yield sse(f'[3/4] DEM 샘플링: {min(ci+chunk, len(all_coords))}/{len(all_coords)}')
+                    yield sse(f'[3/4] DEM 완료')
+                except Exception as e:
+                    dem_error = str(e)
+                    yield sse(f'[3/4] DEM 오류: {dem_error}', 'warn')
+            else:
+                dem_error = f'DEM 없음: {dem_path}'
+                yield sse(f'[3/4] {dem_error}', 'warn')
+
+            yield sse(f'[4/4] SHP 저장 중...')
+            out_dir  = r'C:\TEMP\SHP'
+            os.makedirs(out_dir, exist_ok=True)
+            shp_name = f"{table}_points.shp"
+            shp_path = os.path.join(out_dir, shp_name)
+
+            # ── dep 필드 추가 (dem - z) ──────────────────────
+            gdf['dep'] = gdf.apply(
+                lambda r: round(float(r['dem']) - float(r['z']), 4)
+                if r['dem'] is not None and r['z'] is not None else None,
+                axis=1
+            )
+            yield sse(f'dep 필드 계산 완료 (dem - z)')
+
+            rename_map = {}
+            for col in gdf.columns:
+                if col == 'geometry': continue
+                if len(col) > 10:
+                    rename_map[col] = col[:10]
+            if rename_map:
+                gdf = gdf.rename(columns=rename_map)
+
+            for col in gdf.columns:
+                if col == 'geometry': continue
+                gdf[col] = gdf[col].apply(
+                    lambda v: str(v) if v is not None and not isinstance(v, (int, float, type(None))) else v
+                )
+
+            gdf.to_file(shp_path, driver='ESRI Shapefile', encoding='euc-kr')
+            yield sse(f'[4/4] 저장 완료: {shp_path} ({len(gdf)}건)')
+
+            if rename_map:
+                yield sse(f'컬럼명 축약: {", ".join([f"{o}:{n}" for o,n in rename_map.items()])}', 'warn')
+
+            result = _j.dumps({
+                'path': shp_path, 'count': len(gdf),
+                'shp_name': shp_name, 'dem_path': dem_path,
+                'dem_error': dem_error, 'renamed': rename_map,
+            })
+            yield sse(result, 'done')
+
+        except Exception as e:
+            import traceback as _tb
+            yield sse(f'오류: {str(e)}', 'error')
+            yield sse(_tb.format_exc(), 'error')
+
+    return Response(
+        stream_with_context(generate()),
+        mimetype='text/event-stream',
+        headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
+    )

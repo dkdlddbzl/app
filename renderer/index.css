@@ -220,6 +220,7 @@ table.result td.editing input {
 .log-ok   { color: var(--accent); }
 .log-err  { color: var(--danger); }
 .log-info { color: var(--accent2); }
+.log-warn { color: var(--warn); }
 
 /* 스크롤바 (전역) */
 ::-webkit-scrollbar { width: 4px; }

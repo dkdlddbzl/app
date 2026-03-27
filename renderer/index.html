@@ -1,0 +1,353 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self' 'unsafe-inline'; worker-src blob:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; connect-src http://localhost:5000 https://tile.openstreetmap.org;" />
+  <title>My Electron App</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="index.css">
+  <link rel="stylesheet" href="ol.css">
+</head>
+<body>
+<div class="app">
+
+  <!-- 타이틀바 -->
+  <div class="titlebar">
+    <div class="titlebar-dot"></div>
+    <div class="titlebar-dot"></div>
+    <div class="titlebar-dot"></div>
+    <div class="status-dot" id="status-dot"></div>
+    <span style="font-family:var(--mono);font-size:11px;color:var(--text-dim)" id="status-text">Flask 연결 중...</span>
+    <span class="titlebar-title" id="platform-badge"></span>
+  </div>
+
+  <div class="main">
+    <!-- 사이드바 -->
+    <aside class="sidebar">
+      <div class="sidebar-section">메뉴</div>
+      <div class="nav-item active" onclick="showPage('db', this)">
+        <span class="nav-icon">⊞</span> DB 조회
+      </div>
+      <div class="nav-item" onclick="showPage('dashboard', this)">
+        <span class="nav-icon">◈</span> 대시보드
+      </div>
+      <div class="nav-item" onclick="showPage('map', this)">
+        <span class="nav-icon">◉</span> 맵 조회
+      </div>
+      <div class="nav-item" onclick="showPage('log', this)">
+        <span class="nav-icon">≡</span> 로그
+      </div>
+    </aside>
+
+    <main class="content">
+
+      <!-- ══ DB 조회 ══ -->
+      <div class="page active" id="page-db">
+        <div class="page-header">
+          <h1>DB 조회</h1>
+          <p>테이블명과 WHERE 조건을 입력하고 조회하세요. 값에 <code style="color:var(--accent2)">%</code> 포함 시 LIKE로 처리됩니다.</p>
+        </div>
+
+        <!-- 검색 폼 -->
+        <div class="card">
+          <div class="card-title">검색 조건</div>
+          <!-- WHERE 행 -->
+          <div class="form-row" style="margin-bottom:10px">
+            <div class="field f-table">
+              <label>테이블명</label>
+              <input type="text" id="inp-table" placeholder="예) users" />
+            </div>
+            <div class="field f-column">
+              <label>WHERE 컬럼 <span style="opacity:.5">(선택)</span></label>
+              <input type="text" id="inp-column" placeholder="예) user_code" />
+            </div>
+            <div class="field f-value">
+              <label>검색어 <span style="opacity:.5">(% 와일드카드 가능)</span></label>
+              <input type="text" id="inp-value" placeholder="예) 11110%" onkeydown="if(event.key==='Enter') runQuery()" />
+            </div>
+          </div>
+          <!-- AND 행 -->
+          <div class="form-row" style="margin-bottom:14px">
+            <div class="field f-table">
+              <label style="color:var(--accent2)">AND 배지</label>
+              <div style="height:38px;display:flex;align-items:center;padding:0 4px">
+                <span style="font-family:var(--mono);font-size:11px;color:var(--accent2);background:rgba(61,212,240,.1);border:1px solid rgba(61,212,240,.25);border-radius:4px;padding:3px 10px">AND</span>
+              </div>
+            </div>
+            <div class="field f-column">
+              <label>AND 컬럼 <span style="opacity:.5">(선택)</span></label>
+              <input type="text" id="inp-column2" placeholder="예) status" />
+            </div>
+            <div class="field f-value">
+              <label>AND 검색어 <span style="opacity:.5">(% 와일드카드 가능)</span></label>
+              <input type="text" id="inp-value2" placeholder="예) active" onkeydown="if(event.key==='Enter') runQuery()" />
+            </div>
+          </div>
+          <!-- 버튼 행 -->
+          <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button class="btn btn-primary"  id="query-btn"   onclick="runQuery()">▶ 조회</button>
+            <button class="btn btn-shp"      id="shp-btn"     onclick="exportShp()">⬇ SHP 다운로드</button>
+            <button class="btn btn-service"  id="service-btn" onclick="findServiceFile()">⚙ 서비스 파일</button>
+            <button class="btn btn-ghost"                     onclick="resetQuery()">✕ 초기화</button>
+          </div>
+        </div>
+
+        <!-- 서비스 파일 결과 -->
+        <div id="service-area" style="display:none">
+          <div class="card" style="border-color:rgba(127,119,221,.3)">
+            <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+              <span>서비스 파일</span>
+              <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;height:auto" onclick="closeServiceArea()">✕</button>
+            </div>
+            <div class="service-box" id="service-info"></div>
+          </div>
+        </div>
+
+        <!-- 서비스 빌더 패널 (인라인) -->
+        <div class="service-panel" id="service-panel">
+          <div style="display:flex;justify-content:space-between;align-items:center">
+            <span style="font-family:var(--mono);font-size:11px;color:#a89fec;letter-spacing:.08em;text-transform:uppercase">⚙ 서비스 파일 빌드</span>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;height:auto" onclick="closeServicePanel()">✕</button>
+          </div>
+
+          <div>
+            <!-- 히스토리 -->
+            <div id="shp-history">
+              <div class="modal-section-label" style="margin-bottom:6px">★ 최근 선택 <span id="shp-dir-label" style="color:var(--text-dim);text-transform:none;letter-spacing:0;font-size:10px"></span></div>
+              <div id="shp-history-list"><div class="shp-item" style="cursor:default;color:var(--text-dim)">불러오는 중...</div></div>
+            </div>
+            <!-- 숨김 처리된 전체 목록 (자동선택용) -->
+            <div id="shp-list" style="display:none"></div>
+          </div>
+
+          <div>
+            <div class="modal-section-label">DEM 코드 <span style="color:var(--text-dim);font-size:10px;text-transform:none">(예: 11110 → E:/g/11000/11110.tif)</span></div>
+            <input type="text" id="dem-input"
+              style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:9px 12px;font-family:var(--mono);font-size:13px;color:var(--text);outline:none;width:100%;-webkit-app-region:no-drag;user-select:text;"
+              placeholder="예) 11110"
+              onkeydown="if(event.key==='Enter') buildService()" />
+          </div>
+
+          <div class="build-result" id="build-result">
+            <div class="br-row"><span class="br-label">상태</span><span class="br-val" id="br-status"></span></div>
+            <div class="br-row"><span class="br-label">DEM</span><span class="br-val" id="br-dem"></span></div>
+            <div class="br-row"><span class="br-label">SHP</span><span class="br-val" id="br-shp"></span></div>
+            <div class="br-row"><span class="br-label">JSON</span><span class="br-val" id="br-json"></span></div>
+          </div>
+
+          <div style="display:flex;gap:10px;justify-content:flex-end">
+            <button class="btn btn-ghost" onclick="closeServicePanel()">닫기</button>
+            <button class="btn btn-service" id="build-btn" onclick="buildService()">▶ 만들기</button>
+          </div>
+        </div>
+
+        <!-- 커밋 바 -->
+        <div class="commit-bar" id="commit-bar">
+          <span class="change-count" id="change-count">0개 셀 수정됨</span>
+          <button class="btn btn-rollback" onclick="rollbackChanges()">↺ 되돌리기</button>
+          <button class="btn btn-commit" onclick="commitChanges()">✓ 커밋</button>
+        </div>
+
+        <!-- 결과 -->
+        <div id="result-area">
+          <div class="state-box">
+            <div class="state-icon">⊡</div>
+            <span>조회 결과가 여기에 표시됩니다</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 대시보드 ══ -->
+      <div class="page" id="page-dashboard">
+        <div class="page-header">
+          <h1>대시보드</h1>
+          <p>Flask 서버 상태와 기본 정보를 확인합니다.</p>
+        </div>
+        <div class="stat-grid">
+          <div class="stat"><div class="stat-label">서버 상태</div><div class="stat-value" id="stat-status">—</div></div>
+          <div class="stat"><div class="stat-label">Flask 포트</div><div class="stat-value">5000</div></div>
+          <div class="stat"><div class="stat-label">총 조회 수</div><div class="stat-value" id="stat-calls">0</div></div>
+        </div>
+      </div>
+
+      <!-- ══ 맵 조회 ══ -->
+      <div class="page" id="page-map">
+
+        <!-- 포인트 추출 섹션 -->
+        <div class="card" style="flex-shrink:0;padding:14px 20px;border-color:rgba(61,212,240,.3)">
+          <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+            <div style="font-family:var(--mono);font-size:11px;color:var(--accent2);letter-spacing:.06em;text-transform:uppercase;padding-bottom:10px;flex-basis:100%">◎ 포인트 추출 (3D 관로)</div>
+
+            <!-- 구분 -->
+            <div class="field" style="min-width:90px">
+              <label>구분</label>
+              <select id="pt-div" onchange="onPtDivChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시설물 (3D만) -->
+            <div class="field" style="min-width:130px">
+              <label>시설물</label>
+              <select id="pt-facility" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시도 -->
+            <div class="field" style="min-width:90px">
+              <label>시도</label>
+              <select id="pt-sido" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시군구 -->
+            <div class="field" style="min-width:120px">
+              <label>시군구 코드 <span style="opacity:.5;font-size:10px">(예: 11110)</span></label>
+              <input type="text" id="pt-sigungu"
+                placeholder="예) 11110"
+                maxlength="10"
+                style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag;width:100%"
+                onkeydown="if(event.key==='Enter') extractPoints()" />
+            </div>
+
+            <!-- 테이블명 표시 -->
+            <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);padding-bottom:10px">
+              → <span id="pt-table-label" style="color:var(--accent2)">—</span>
+            </div>
+
+            <div style="flex:1"></div>
+
+            <!-- 버튼 -->
+            <button class="btn btn-shp" id="pt-extract-btn" onclick="extractPoints()" style="height:36px;padding:0 16px;font-size:12px">◎ 추출</button>
+          </div>
+        </div>
+
+        <!-- 검색 조건 카드 -->
+        <div class="card" style="flex-shrink:0;padding:14px 20px">
+          <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
+
+            <!-- 구분 -->
+            <div class="field" style="min-width:90px">
+              <label>구분</label>
+              <select id="map-div" onchange="onMapDivChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시설물 -->
+            <div class="field" style="min-width:100px">
+              <label>시설물</label>
+              <select id="map-facility" onchange="onMapFacilityChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시도 -->
+            <div class="field" style="min-width:90px">
+              <label>시도</label>
+              <select id="map-sido" onchange="onMapSidoChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시군구 -->
+            <div class="field" style="min-width:120px">
+              <label>시군구 코드 <span style="opacity:.5;font-size:10px">(예: 11110)</span></label>
+              <input type="text" id="map-sigungu"
+                placeholder="예) 11110"
+                maxlength="10"
+                style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag;width:100%"
+                onkeydown="if(event.key==='Enter') loadMapData()" />
+            </div>
+
+            <!-- 테이블명 표시 -->
+            <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);padding-bottom:10px">
+              → <span id="map-table-label" style="color:var(--accent)">—</span>
+            </div>
+
+            <div style="flex:1"></div>
+
+            <!-- 버튼 -->
+            <button class="btn btn-primary" id="map-load-btn" onclick="loadMapData()" style="height:36px;padding:0 16px;font-size:12px">▶ 조회</button>
+            <button class="btn btn-ghost"   onclick="mapFitExtent()"   style="height:36px;padding:0 12px;font-size:12px">⊕ 전체</button>
+            <button class="btn btn-service" onclick="openSaveIndexMap()" style="height:36px;padding:0 12px;font-size:12px">★ 저장</button>
+          </div>
+        </div>
+
+        <!-- 인덱스맵 + 맵 영역 (가로 분할) -->
+        <div style="display:flex;gap:12px;flex:1;min-height:0">
+
+          <!-- 인덱스맵 패널 -->
+          <div id="index-map-panel" style="width:200px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
+            <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase;padding:0 2px">★ 인덱스맵</div>
+            <div id="index-map-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+          </div>
+
+          <!-- 맵 컨테이너 -->
+          <div style="position:relative;flex:1;min-height:0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)">
+            <div id="map-container" style="width:100%;height:100%"></div>
+
+            <!-- 피처 수 + 레이어 필터 -->
+            <div style="position:absolute;top:10px;right:10px;display:flex;gap:8px;align-items:center;z-index:10">
+              <div id="map-layer-filter" style="display:flex;gap:6px"></div>
+              <div id="map-count-label" style="font-family:var(--mono);font-size:11px;color:var(--text-dim);background:rgba(13,15,17,.8);padding:3px 8px;border-radius:4px"></div>
+            </div>
+
+            <!-- 속성 팝업 -->
+            <div id="map-popup" style="display:none;position:absolute;bottom:20px;left:20px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;font-family:var(--mono);font-size:11px;max-width:300px;max-height:260px;overflow-y:auto;z-index:100;pointer-events:auto;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+                <span style="color:var(--text-dim);font-size:10px;letter-spacing:.06em;text-transform:uppercase">속성</span>
+                <button onclick="closeMapPopup()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;padding:0;line-height:1">✕</button>
+              </div>
+              <div id="map-popup-content"></div>
+            </div>
+
+            <!-- 좌표 -->
+            <div id="map-coord" style="position:absolute;bottom:8px;right:8px;font-family:var(--mono);font-size:10px;color:var(--text-dim);background:rgba(13,15,17,.7);padding:3px 8px;border-radius:4px;pointer-events:none">—</div>
+          </div>
+        </div>
+
+        <!-- 인덱스맵 저장 패널 (인라인) -->
+        <div id="save-index-panel" style="display:none;flex-shrink:0">
+          <div class="card" style="border-color:rgba(240,168,74,.3);padding:14px 20px">
+            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="font-family:var(--mono);font-size:11px;color:var(--warn)">★ 인덱스맵 저장</span>
+              <input type="text" id="index-map-name" placeholder="이름 입력 (예: 서울 상수 밸브)"
+                style="flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:7px 12px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag"
+                onkeydown="if(event.key==='Enter') saveIndexMap()" />
+              <button class="btn btn-ghost" onclick="document.getElementById('save-index-panel').style.display='none'" style="height:34px;padding:0 12px;font-size:12px">취소</button>
+              <button class="btn btn-commit" onclick="saveIndexMap()" style="height:34px;padding:0 12px;font-size:12px">저장</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ══ 로그 ══ -->
+      <div class="page" id="page-log">
+        <div class="page-header">
+          <h1>로그</h1>
+          <p>API 호출 기록을 확인합니다.</p>
+        </div>
+        <div class="card">
+          <div class="card-title" style="display:flex;justify-content:space-between;align-items:center">
+            <span>호출 로그</span>
+            <button class="btn btn-ghost" style="padding:4px 10px;font-size:11px;height:auto" onclick="clearLog()">지우기</button>
+          </div>
+          <div class="log-box" id="log-box">
+            <div class="log-line"><span class="log-time">--:--:--</span><span class="log-info">앱이 시작되었습니다.</span></div>
+          </div>
+        </div>
+      </div>
+
+    </main>
+  </div>
+</div>
+
+<script src="ol.js"></script>
+<script src="map.js"></script>
+<script src="index.js"></script>
+</body>
+</html>

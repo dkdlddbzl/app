@@ -12,6 +12,8 @@ async function loadMapMeta() {
     mapMeta   = await res.json();
     renderPtDivSelect();
     renderPtSidoSelect();
+    renderCmpDivSelect();
+    renderCmpSidoSelect();
   } catch(e) {
     addLog('err', '맵 메타 로드 실패: ' + e.message);
   }
@@ -142,17 +144,67 @@ async function extractPoints() {
   }
 }
 
+// ── 심도 비교 — 구분/시설물/시도 셀렉트 ─────────────────
+function renderCmpDivSelect() {
+  if (!mapMeta) return;
+  const sel = document.getElementById('cmp-div');
+  sel.innerHTML = '<option value="">선택</option>' +
+    Object.entries(mapMeta.facilities).map(([k, v]) =>
+      `<option value="${k}">${v.label} (${k})</option>`
+    ).join('');
+}
+
+function renderCmpSidoSelect() {
+  if (!mapMeta) return;
+  const sel = document.getElementById('cmp-sido');
+  sel.innerHTML = '<option value="">선택</option>' +
+    mapMeta.sido.map(s => `<option value="${s.code}">${s.label} (${s.code})</option>`).join('');
+}
+
+function onCmpDivChange() {
+  const div    = document.getElementById('cmp-div').value;
+  const facSel = document.getElementById('cmp-facility');
+  facSel.innerHTML = '<option value="">선택</option>';
+  if (div && mapMeta?.facilities[div]) {
+    Object.entries(mapMeta.facilities[div].facilities).forEach(([k, v]) => {
+      facSel.innerHTML += `<option value="${k}">${v.label} (${k})</option>`;
+    });
+  }
+  updateCmpTableLabel();
+}
+
+function updateCmpTableLabel() {
+  const div      = document.getElementById('cmp-div').value;
+  const facility = document.getElementById('cmp-facility').value;
+  const sido     = document.getElementById('cmp-sido').value;
+  const label    = document.getElementById('cmp-table-label');
+  if (div && facility && sido) {
+    label.textContent = `${div}_${facility}_${sido}000`;
+  } else {
+    label.textContent = '—';
+  }
+}
+
 // ── 심도 비교 ─────────────────────────────────────────────
 async function runDepthComparison() {
   const facilityType = document.getElementById('cmp-type').value;
-  const table        = document.getElementById('cmp-table').value.trim();
+  const div          = document.getElementById('cmp-div').value;
+  const facility     = document.getElementById('cmp-facility').value;
+  const sido         = document.getElementById('cmp-sido').value;
+  const sigunguRaw   = document.getElementById('cmp-sigungu').value.trim();
+  const sigungu      = sigunguRaw
+    ? (sigunguRaw.endsWith('%') ? sigunguRaw : sigunguRaw + '%')
+    : '';
+
+  if (!div || !facility || !sido) {
+    alert('구분, 시설물, 시도를 선택해주세요.');
+    return;
+  }
+
+  const table = `${div}_${facility}_${sido}000`;
 
   if (!lastExtractedShpPath) {
     alert('먼저 포인트 추출을 실행해주세요.');
-    return;
-  }
-  if (!table) {
-    alert('조회할 테이블명을 입력해주세요.');
     return;
   }
 
@@ -160,7 +212,7 @@ async function runDepthComparison() {
   btn.disabled = true;
   btn.innerHTML = '<div class="spinner"></div>';
 
-  addLog('info', `심도 비교 시작: ${table} (${facilityType === 'manhol' ? '맨홀/man_dep' : '밸브/val_dep'})`);
+  addLog('info', `심도 비교 시작: ${table}${sigungu ? ' (' + sigungu + ')' : ''} [${facilityType === 'manhol' ? '맨홀/man_dep' : '밸브/val_dep'}]`);
 
   try {
     const res = await fetch(`${window.flaskUrl}/api/map/compare-depth`, {
@@ -170,6 +222,7 @@ async function runDepthComparison() {
         shp_path:      lastExtractedShpPath,
         facility_type: facilityType,
         table,
+        sigungu,
       }),
     });
     const data = await res.json();
@@ -281,5 +334,7 @@ window.onMapPageShow       = onMapPageShow;
 window.onPtDivChange       = onPtDivChange;
 window.updatePtTableLabel  = updatePtTableLabel;
 window.extractPoints       = extractPoints;
+window.onCmpDivChange      = onCmpDivChange;
+window.updateCmpTableLabel = updateCmpTableLabel;
 window.runDepthComparison  = runDepthComparison;
 window.switchCmpTab        = switchCmpTab;

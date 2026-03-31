@@ -1,10 +1,1 @@
-{
-  "하수 맨홀 서울 11110%": {
-    "div": "SWL",
-    "facility": "MANH_PS",
-    "sido": "11",
-    "sigungu": "11110%",
-    "table": "SWL_MANH_PS_11000",
-    "layerKey": "SWL_MANH_PS"
-  }
-}
+{}

@@ -239,18 +239,44 @@
               </select>
             </div>
 
-            <!-- 테이블명 -->
-            <div class="field" style="min-width:220px;flex:1">
-              <label>조회 테이블명</label>
-              <input type="text" id="cmp-table"
-                placeholder="예) WTL_MANH_PS_11000"
+            <!-- 구분 -->
+            <div class="field" style="min-width:90px">
+              <label>구분</label>
+              <select id="cmp-div" onchange="onCmpDivChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시설물 -->
+            <div class="field" style="min-width:120px">
+              <label>시설물</label>
+              <select id="cmp-facility" onchange="updateCmpTableLabel()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시도 -->
+            <div class="field" style="min-width:90px">
+              <label>시도</label>
+              <select id="cmp-sido" onchange="updateCmpTableLabel()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="">선택</option>
+              </select>
+            </div>
+
+            <!-- 시군구 코드 -->
+            <div class="field" style="min-width:120px">
+              <label>시군구 코드 <span style="opacity:.5;font-size:10px">(예: 11110)</span></label>
+              <input type="text" id="cmp-sigungu"
+                placeholder="예) 11110"
+                maxlength="10"
                 style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag;width:100%"
                 onkeydown="if(event.key==='Enter') runDepthComparison()" />
             </div>
 
-            <!-- 추출 SHP 경로 표시 -->
-            <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);padding-bottom:10px;white-space:nowrap">
-              SHP: <span id="cmp-shp-label" style="color:var(--accent2)">—</span>
+            <!-- 테이블명 + SHP 표시 -->
+            <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);padding-bottom:10px;display:flex;flex-direction:column;gap:4px">
+              <span>→ <span id="cmp-table-label" style="color:#a89fec">—</span></span>
+              <span>SHP: <span id="cmp-shp-label" style="color:var(--accent2)">—</span></span>
             </div>
 
             <div style="flex:1"></div>

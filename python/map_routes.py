@@ -441,6 +441,7 @@ def compare_depth():
     shp_path      = (data.get('shp_path')      or '').strip()
     facility_type = (data.get('facility_type') or '').strip()  # manhol / valve
     table         = (data.get('table')         or '').strip()
+    sigungu       = (data.get('sigungu')       or '').strip()
 
     if not shp_path:
         return jsonify({'error': '추출된 SHP 경로가 없습니다. 먼저 포인트 추출을 실행해주세요.'}), 400
@@ -476,10 +477,11 @@ def compare_depth():
 
         # 2. DB 테이블에서 위치 + 심도 조회
         engine = _get_engine()
+        where  = f"WHERE hjd_cde LIKE '{sigungu}'" if sigungu else ''
         sql = _text(f"""
             SELECT {dep_col},
                    ST_AsText(ST_Transform(geom, 5186)) AS geom_wkt
-            FROM {table}
+            FROM {table} {where}
         """)
         with engine.connect() as con:
             db_df = pd.read_sql(sql, con)

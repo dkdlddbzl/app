@@ -479,7 +479,7 @@ def compare_depth():
         engine = _get_engine()
         where  = f"WHERE hjd_cde LIKE '{sigungu}'" if sigungu else ''
         sql = _text(f"""
-            SELECT {dep_col},
+            SELECT ftr_idn, {dep_col},
                    ST_AsText(ST_SetSRID(geom, 5186)) AS geom_wkt
             FROM {table} {where}
         """)
@@ -511,9 +511,11 @@ def compare_depth():
         joined = db_gdf.sjoin_nearest(
             pts_sub, how='left', distance_col='_dist'
         )
+        # 동일 거리 포인트가 여러 개일 때 중복 제거 — DB 행 1개당 가장 가까운 1건만 유지
+        joined = joined.sort_values('_dist').loc[~joined.index.duplicated(keep='first')]
 
         # 5. 결과 구성
-        DEP_TOLERANCE = 0.05  # 심도 일치 허용 오차 (5cm)
+        DEP_TOLERANCE = 2.0 if facility_type == 'manhol' else 0.1  # 맨홀 ±2m, 밸브 ±0.1m
         rows = []
 
         for i, (_, row) in enumerate(joined.iterrows()):
@@ -539,6 +541,7 @@ def compare_depth():
 
             rows.append({
                 'no':        i + 1,
+                'ftr_idn':   row.get('ftr_idn'),
                 'x':         x,
                 'y':         y,
                 dep_col:     str(dep_db_f) if dep_db_f is not None else None,

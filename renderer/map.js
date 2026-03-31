@@ -4,6 +4,9 @@ let lastExtractedShpPath = null;   // 마지막 추출 SHP 전체 경로
 let cmpAllData           = [];     // 전체 비교 결과
 let cmpMisData           = [];     // 미일치 결과
 let cmpDepCol            = 'man_dep';
+let cmpSortKey           = null;   // 현재 정렬 컬럼 ('ftr_idn' | 'diff')
+let cmpSortAsc           = true;   // 정렬 방향
+let cmpCurrentTab        = 'all';  // 현재 활성 탭
 
 // ── 메타 로드 ────────────────────────────────────────────
 async function loadMapMeta() {
@@ -261,6 +264,7 @@ async function runDepthComparison() {
 }
 
 function switchCmpTab(tab) {
+  cmpCurrentTab = tab;
   const allBtn = document.getElementById('tab-all');
   const misBtn = document.getElementById('tab-mis');
 
@@ -275,41 +279,82 @@ function switchCmpTab(tab) {
   }
 }
 
+function sortCmpTable(key) {
+  if (cmpSortKey === key) {
+    cmpSortAsc = !cmpSortAsc;
+  } else {
+    cmpSortKey = key;
+    cmpSortAsc = true;
+  }
+  const data = cmpCurrentTab === 'all' ? cmpAllData : cmpMisData;
+  renderCmpTable(data);
+}
+
 function renderCmpTable(rows) {
   const tbl = document.getElementById('cmp-table');
 
   if (!rows || !rows.length) {
     tbl.innerHTML = `
-      <tr><td colspan="7"
+      <tr><td colspan="8"
         style="text-align:center;color:var(--text-dim);padding:30px;font-family:var(--mono);font-size:12px">
         데이터 없음
       </td></tr>`;
     return;
   }
 
-  const thStyle = 'padding:8px 12px;text-align:left;font-family:var(--mono);font-size:11px;color:var(--text-dim);letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg2)';
-  const tdStyle = 'padding:7px 12px;font-family:var(--mono);font-size:12px;border-bottom:1px solid rgba(37,42,50,.4);white-space:nowrap';
+  // 정렬 적용
+  let sorted = [...rows];
+  if (cmpSortKey) {
+    sorted.sort((a, b) => {
+      let va = a[cmpSortKey], vb = b[cmpSortKey];
+      if (cmpSortKey === 'diff') {
+        va = va !== null && va !== undefined ? parseFloat(va) : null;
+        vb = vb !== null && vb !== undefined ? parseFloat(vb) : null;
+        if (va === null && vb === null) return 0;
+        if (va === null) return 1;
+        if (vb === null) return -1;
+        return cmpSortAsc ? va - vb : vb - va;
+      } else {
+        va = va ?? '';
+        vb = vb ?? '';
+        return cmpSortAsc
+          ? String(va).localeCompare(String(vb), 'ko')
+          : String(vb).localeCompare(String(va), 'ko');
+      }
+    });
+  }
+
+  const thStyle    = 'padding:8px 12px;text-align:left;font-family:var(--mono);font-size:11px;color:var(--text-dim);letter-spacing:.04em;text-transform:uppercase;border-bottom:1px solid var(--border);white-space:nowrap;background:var(--bg2)';
+  const thSortable = thStyle + ';cursor:pointer;user-select:none';
+  const tdStyle    = 'padding:7px 12px;font-family:var(--mono);font-size:12px;border-bottom:1px solid rgba(37,42,50,.4);white-space:nowrap';
+
+  const sortIcon = (key) => {
+    if (cmpSortKey !== key) return ' <span style="opacity:.3">⇅</span>';
+    return cmpSortAsc ? ' <span style="color:var(--accent)">↑</span>' : ' <span style="color:var(--accent)">↓</span>';
+  };
 
   const header = `
     <thead>
       <tr>
         <th style="${thStyle}">No</th>
+        <th style="${thSortable}" onclick="sortCmpTable('ftr_idn')">ftr_idn${sortIcon('ftr_idn')}</th>
         <th style="${thStyle}">X</th>
         <th style="${thStyle}">Y</th>
         <th style="${thStyle}">${cmpDepCol} (DB)</th>
         <th style="${thStyle}">추출심도</th>
-        <th style="${thStyle}">차이</th>
+        <th style="${thSortable}" onclick="sortCmpTable('diff')">차이${sortIcon('diff')}</th>
         <th style="${thStyle}">일치</th>
       </tr>
     </thead>`;
 
-  const bodyRows = rows.map(r => {
+  const bodyRows = sorted.map((r, i) => {
     const matchColor = r.match ? 'var(--accent)' : 'var(--danger)';
     const matchIcon  = r.match ? '✓' : '✗';
     const rowBg      = r.match ? '' : 'background:rgba(255,80,80,.04)';
     return `
       <tr style="${rowBg}">
-        <td style="${tdStyle};color:var(--text-dim)">${r.no}</td>
+        <td style="${tdStyle};color:var(--text-dim)">${i + 1}</td>
+        <td style="${tdStyle}">${r.ftr_idn ?? '—'}</td>
         <td style="${tdStyle}">${r.x ?? '—'}</td>
         <td style="${tdStyle}">${r.y ?? '—'}</td>
         <td style="${tdStyle}">${r[cmpDepCol] ?? '—'}</td>

@@ -427,3 +427,134 @@ def extract_points():
         mimetype='text/event-stream',
         headers={'Cache-Control': 'no-cache', 'X-Accel-Buffering': 'no'}
     )
+
+
+# ─── 심도 비교 (추출 포인트 ↔ 맨홀/밸브 테이블) ─────────
+@map_bp.route('/api/map/compare-depth', methods=['POST'])
+def compare_depth():
+    import geopandas as gpd
+    import pandas as pd
+    from shapely import wkt as _wkt
+    from sqlalchemy import text as _text
+
+    data          = request.get_json()
+    shp_path      = (data.get('shp_path')      or '').strip()
+    facility_type = (data.get('facility_type') or '').strip()  # manhol / valve
+    table         = (data.get('table')         or '').strip()
+
+    if not shp_path:
+        return jsonify({'error': '추출된 SHP 경로가 없습니다. 먼저 포인트 추출을 실행해주세요.'}), 400
+    if not facility_type:
+        return jsonify({'error': '유형(맨홀/밸브)을 선택해주세요.'}), 400
+    if not table:
+        return jsonify({'error': '조회할 테이블명을 입력해주세요.'}), 400
+    if not _is_valid(table):
+        return jsonify({'error': '유효하지 않은 테이블명입니다.'}), 400
+    if not os.path.exists(shp_path):
+        return jsonify({'error': f'SHP 파일이 없습니다: {shp_path}'}), 404
+
+    dep_col = 'man_dep' if facility_type == 'manhol' else 'val_dep'
+
+    try:
+        # 1. 추출된 포인트 SHP 로드
+        pts_gdf = gpd.read_file(shp_path, encoding='euc-kr')
+        pts_gdf.columns = [c.strip().lower() for c in pts_gdf.columns]
+        if pts_gdf.crs is None:
+            pts_gdf = pts_gdf.set_crs(epsg=5186)
+        else:
+            pts_gdf = pts_gdf.to_crs(epsg=5186)
+
+        if 'dep' not in pts_gdf.columns:
+            return jsonify({'error': "추출된 SHP에 'dep' 컬럼이 없습니다."}), 400
+
+        pts_sub = pts_gdf[pts_gdf.geometry.notna()][['dep', 'geometry']].copy()
+        pts_sub['dep'] = pd.to_numeric(pts_sub['dep'], errors='coerce')
+        pts_sub = pts_sub.rename(columns={'dep': 'dep_extracted'})
+
+        if pts_sub.empty:
+            return jsonify({'error': '추출된 포인트가 없습니다.'}), 400
+
+        # 2. DB 테이블에서 위치 + 심도 조회
+        engine = _get_engine()
+        sql = _text(f"""
+            SELECT {dep_col},
+                   ST_AsText(ST_Transform(geom, 5186)) AS geom_wkt
+            FROM {table}
+        """)
+        with engine.connect() as con:
+            db_df = pd.read_sql(sql, con)
+
+        if db_df.empty:
+            return jsonify({'error': '조회된 데이터가 없습니다.'}), 404
+
+        if dep_col not in db_df.columns:
+            return jsonify({'error': f"테이블에 '{dep_col}' 컬럼이 없습니다."}), 400
+
+        # 3. GeoDataFrame 생성
+        db_df['geometry'] = db_df['geom_wkt'].apply(
+            lambda w: _wkt.loads(w) if w else None
+        )
+        db_gdf = gpd.GeoDataFrame(
+            db_df.drop(columns=['geom_wkt']),
+            geometry='geometry', crs='EPSG:5186'
+        )
+        db_gdf = db_gdf[db_gdf.geometry.notna()].reset_index(drop=True)
+        db_gdf[dep_col] = pd.to_numeric(db_gdf[dep_col], errors='coerce')
+
+        if db_gdf.empty:
+            return jsonify({'error': '유효한 위치 데이터가 없습니다.'}), 400
+
+        # 4. 공간 조인 — 각 DB 행에 가장 가까운 추출 포인트 매칭 (1m 이내)
+        TOLERANCE = 1.0  # 단위: 미터 (EPSG:5186)
+        joined = db_gdf.sjoin_nearest(
+            pts_sub, how='left', distance_col='_dist'
+        )
+
+        # 5. 결과 구성
+        DEP_TOLERANCE = 0.05  # 심도 일치 허용 오차 (5cm)
+        rows = []
+
+        for i, (_, row) in enumerate(joined.iterrows()):
+            x = round(row.geometry.x, 4) if row.geometry else None
+            y = round(row.geometry.y, 4) if row.geometry else None
+
+            dist    = row.get('_dist')
+            dep_db  = row.get(dep_col)
+            dep_ext = row.get('dep_extracted') if (dist is not None and not pd.isna(dist) and dist <= TOLERANCE) else None
+
+            try:
+                dep_db_f  = float(dep_db)  if dep_db  is not None and not pd.isna(dep_db)  else None
+                dep_ext_f = float(dep_ext) if dep_ext is not None and not pd.isna(dep_ext) else None
+            except (TypeError, ValueError):
+                dep_db_f = dep_ext_f = None
+
+            if dep_db_f is not None and dep_ext_f is not None:
+                diff  = round(dep_db_f - dep_ext_f, 4)
+                match = abs(diff) <= DEP_TOLERANCE
+            else:
+                diff  = None
+                match = False
+
+            rows.append({
+                'no':        i + 1,
+                'x':         x,
+                'y':         y,
+                dep_col:     str(dep_db_f) if dep_db_f is not None else None,
+                'dep_ext':   str(dep_ext_f) if dep_ext_f is not None else None,
+                'diff':      str(diff) if diff is not None else None,
+                'match':     match,
+            })
+
+        mismatches = [r for r in rows if not r['match']]
+
+        return jsonify({
+            'all':            rows,
+            'mismatches':     mismatches,
+            'total':          len(rows),
+            'mismatch_count': len(mismatches),
+            'match_count':    len(rows) - len(mismatches),
+            'dep_col':        dep_col,
+        })
+
+    except Exception as e:
+        return jsonify({'error': str(e), 'detail': traceback.format_exc()}), 500

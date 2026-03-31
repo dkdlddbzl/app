@@ -225,103 +225,62 @@
           </div>
         </div>
 
-        <!-- 검색 조건 카드 -->
-        <div class="card" style="flex-shrink:0;padding:14px 20px">
+        <!-- 심도 비교 카드 -->
+        <div class="card" style="flex-shrink:0;padding:14px 20px;border-color:rgba(127,119,221,.3)">
+          <div style="font-family:var(--mono);font-size:11px;color:#a89fec;letter-spacing:.06em;text-transform:uppercase;margin-bottom:12px">⊠ 심도 비교</div>
           <div style="display:flex;align-items:flex-end;gap:10px;flex-wrap:wrap">
 
-            <!-- 구분 -->
-            <div class="field" style="min-width:90px">
-              <label>구분</label>
-              <select id="map-div" onchange="onMapDivChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
-                <option value="">선택</option>
+            <!-- 유형 선택 -->
+            <div class="field" style="min-width:150px">
+              <label>유형</label>
+              <select id="cmp-type" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
+                <option value="manhol">맨홀 (man_dep)</option>
+                <option value="valve">밸브 (val_dep)</option>
               </select>
             </div>
 
-            <!-- 시설물 -->
-            <div class="field" style="min-width:100px">
-              <label>시설물</label>
-              <select id="map-facility" onchange="onMapFacilityChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
-                <option value="">선택</option>
-              </select>
-            </div>
-
-            <!-- 시도 -->
-            <div class="field" style="min-width:90px">
-              <label>시도</label>
-              <select id="map-sido" onchange="onMapSidoChange()" style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag">
-                <option value="">선택</option>
-              </select>
-            </div>
-
-            <!-- 시군구 -->
-            <div class="field" style="min-width:120px">
-              <label>시군구 코드 <span style="opacity:.5;font-size:10px">(예: 11110)</span></label>
-              <input type="text" id="map-sigungu"
-                placeholder="예) 11110"
-                maxlength="10"
+            <!-- 테이블명 -->
+            <div class="field" style="min-width:220px;flex:1">
+              <label>조회 테이블명</label>
+              <input type="text" id="cmp-table"
+                placeholder="예) WTL_MANH_PS_11000"
                 style="background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:8px 10px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag;width:100%"
-                onkeydown="if(event.key==='Enter') loadMapData()" />
+                onkeydown="if(event.key==='Enter') runDepthComparison()" />
             </div>
 
-            <!-- 테이블명 표시 -->
-            <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);padding-bottom:10px">
-              → <span id="map-table-label" style="color:var(--accent)">—</span>
+            <!-- 추출 SHP 경로 표시 -->
+            <div style="font-family:var(--mono);font-size:11px;color:var(--text-dim);padding-bottom:10px;white-space:nowrap">
+              SHP: <span id="cmp-shp-label" style="color:var(--accent2)">—</span>
             </div>
 
             <div style="flex:1"></div>
 
-            <!-- 버튼 -->
-            <button class="btn btn-primary" id="map-load-btn" onclick="loadMapData()" style="height:36px;padding:0 16px;font-size:12px">▶ 조회</button>
-            <button class="btn btn-ghost"   onclick="mapFitExtent()"   style="height:36px;padding:0 12px;font-size:12px">⊕ 전체</button>
-            <button class="btn btn-service" onclick="openSaveIndexMap()" style="height:36px;padding:0 12px;font-size:12px">★ 저장</button>
+            <button class="btn btn-service" id="cmp-run-btn" onclick="runDepthComparison()" style="height:36px;padding:0 16px;font-size:12px">▶ 비교</button>
           </div>
         </div>
 
-        <!-- 인덱스맵 + 맵 영역 (가로 분할) -->
-        <div style="display:flex;gap:12px;flex:1;min-height:0">
+        <!-- 비교 결과 -->
+        <div style="flex:1;min-height:0;display:flex;flex-direction:column;gap:8px;overflow:hidden">
 
-          <!-- 인덱스맵 패널 -->
-          <div id="index-map-panel" style="width:200px;flex-shrink:0;display:flex;flex-direction:column;gap:8px">
-            <div style="font-family:var(--mono);font-size:10px;color:var(--text-dim);letter-spacing:.08em;text-transform:uppercase;padding:0 2px">★ 인덱스맵</div>
-            <div id="index-map-list" style="flex:1;overflow-y:auto;display:flex;flex-direction:column;gap:4px"></div>
+          <!-- empty state -->
+          <div class="state-box" id="cmp-empty">
+            <div class="state-icon">⊡</div>
+            <span>포인트 추출 후 비교 조회를 실행하세요</span>
           </div>
 
-          <!-- 맵 컨테이너 -->
-          <div style="position:relative;flex:1;min-height:0;border-radius:var(--radius);overflow:hidden;border:1px solid var(--border)">
-            <div id="map-container" style="width:100%;height:100%"></div>
-
-            <!-- 피처 수 + 레이어 필터 -->
-            <div style="position:absolute;top:10px;right:10px;display:flex;gap:8px;align-items:center;z-index:10">
-              <div id="map-layer-filter" style="display:flex;gap:6px"></div>
-              <div id="map-count-label" style="font-family:var(--mono);font-size:11px;color:var(--text-dim);background:rgba(13,15,17,.8);padding:3px 8px;border-radius:4px"></div>
+          <!-- 탭 + 테이블 -->
+          <div id="cmp-table-area" style="display:none;flex-direction:column;flex:1;min-height:0">
+            <!-- 탭 버튼 -->
+            <div style="display:flex;gap:6px;flex-shrink:0;margin-bottom:6px">
+              <button id="tab-all" onclick="switchCmpTab('all')" class="btn btn-primary" style="height:32px;padding:0 16px;font-size:12px">전체 <span id="tab-all-count" style="opacity:.7"></span></button>
+              <button id="tab-mis" onclick="switchCmpTab('mis')" class="btn btn-ghost"   style="height:32px;padding:0 16px;font-size:12px">미일치 <span id="tab-mis-count" style="opacity:.7"></span></button>
             </div>
-
-            <!-- 속성 팝업 -->
-            <div id="map-popup" style="display:none;position:absolute;bottom:20px;left:20px;background:var(--bg2);border:1px solid var(--border);border-radius:var(--radius);padding:14px 16px;font-family:var(--mono);font-size:11px;max-width:300px;max-height:260px;overflow-y:auto;z-index:100;pointer-events:auto;">
-              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-                <span style="color:var(--text-dim);font-size:10px;letter-spacing:.06em;text-transform:uppercase">속성</span>
-                <button onclick="closeMapPopup()" style="background:none;border:none;color:var(--text-dim);cursor:pointer;font-size:14px;padding:0;line-height:1">✕</button>
-              </div>
-              <div id="map-popup-content"></div>
-            </div>
-
-            <!-- 좌표 -->
-            <div id="map-coord" style="position:absolute;bottom:8px;right:8px;font-family:var(--mono);font-size:10px;color:var(--text-dim);background:rgba(13,15,17,.7);padding:3px 8px;border-radius:4px;pointer-events:none">—</div>
-          </div>
-        </div>
-
-        <!-- 인덱스맵 저장 패널 (인라인) -->
-        <div id="save-index-panel" style="display:none;flex-shrink:0">
-          <div class="card" style="border-color:rgba(240,168,74,.3);padding:14px 20px">
-            <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
-              <span style="font-family:var(--mono);font-size:11px;color:var(--warn)">★ 인덱스맵 저장</span>
-              <input type="text" id="index-map-name" placeholder="이름 입력 (예: 서울 상수 밸브)"
-                style="flex:1;min-width:180px;background:var(--bg);border:1px solid var(--border);border-radius:var(--radius);padding:7px 12px;font-family:var(--mono);font-size:12px;color:var(--text);outline:none;-webkit-app-region:no-drag"
-                onkeydown="if(event.key==='Enter') saveIndexMap()" />
-              <button class="btn btn-ghost" onclick="document.getElementById('save-index-panel').style.display='none'" style="height:34px;padding:0 12px;font-size:12px">취소</button>
-              <button class="btn btn-commit" onclick="saveIndexMap()" style="height:34px;padding:0 12px;font-size:12px">저장</button>
+            <!-- 결과 테이블 -->
+            <div style="flex:1;overflow:auto;min-height:0;border:1px solid var(--border);border-radius:var(--radius)">
+              <table id="cmp-table" style="width:100%;border-collapse:collapse;font-family:var(--mono);font-size:12px"></table>
             </div>
           </div>
+
         </div>
       </div>
 

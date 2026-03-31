@@ -480,7 +480,7 @@ def compare_depth():
         where  = f"WHERE hjd_cde LIKE '{sigungu}'" if sigungu else ''
         sql = _text(f"""
             SELECT {dep_col},
-                   ST_AsText(ST_Transform(geom, 5186)) AS geom_wkt
+                   ST_AsText(ST_SetSRID(geom, 5186)) AS geom_wkt
             FROM {table} {where}
         """)
         with engine.connect() as con:
